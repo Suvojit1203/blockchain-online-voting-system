@@ -73,7 +73,7 @@ face_landmark_68
 face_recognition
 ```
 
-If model files are not present, the component uses a clearly labelled demo fallback so the project can still be demonstrated on a laptop.
+If model files are not present, face verification fails safely and does not approve the voter. This avoids fraudulent auto-matches during registration or vote casting.
 
 ## Setup
 

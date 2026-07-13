@@ -3,51 +3,7 @@ import { Camera, CheckCircle2, ScanFace, ShieldAlert } from "lucide-react";
 import * as faceapi from "face-api.js";
 
 const MODEL_URL = "/models";
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Unable to load image for comparison."));
-    image.src = src;
-  });
-}
-
-async function compareWithDemoFallback(referenceImage, capturedImage) {
-  if (!referenceImage || !capturedImage) return 0;
-
-  try {
-    const [reference, captured] = await Promise.all([
-      loadImage(referenceImage),
-      loadImage(capturedImage)
-    ]);
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-    const size = 24;
-    canvas.width = size;
-    canvas.height = size;
-
-    context.drawImage(reference, 0, 0, size, size);
-    const referencePixels = context.getImageData(0, 0, size, size).data;
-    context.clearRect(0, 0, size, size);
-    context.drawImage(captured, 0, 0, size, size);
-    const capturedPixels = context.getImageData(0, 0, size, size).data;
-
-    let difference = 0;
-    for (let index = 0; index < referencePixels.length; index += 4) {
-      difference += Math.abs(referencePixels[index] - capturedPixels[index]);
-      difference += Math.abs(referencePixels[index + 1] - capturedPixels[index + 1]);
-      difference += Math.abs(referencePixels[index + 2] - capturedPixels[index + 2]);
-    }
-
-    const maxDifference = size * size * 3 * 255;
-    const similarity = Math.round((1 - difference / maxDifference) * 100);
-    return Math.max(similarity, 82);
-  } catch {
-    return 82;
-  }
-}
+const FACE_DISTANCE_THRESHOLD = 0.55;
 
 async function loadFaceModels() {
   await Promise.all([
@@ -59,7 +15,7 @@ async function loadFaceModels() {
 
 export default function FaceVerification({
   referenceImage,
-  threshold = 75,
+  threshold = 60,
   onVerified,
   title = "Face Verification",
   description = "Capture live face image and compare with registration photograph."
@@ -133,9 +89,6 @@ export default function FaceVerification({
     setBusy(true);
 
     try {
-      let match = 0;
-      let usedModel = true;
-
       try {
         await loadFaceModels();
         const reference = await faceapi.fetchImage(referenceImage);
@@ -158,23 +111,25 @@ export default function FaceVerification({
           referenceResult.descriptor,
           capturedResult.descriptor
         );
-        match = Math.round(Math.max(0, 1 - Math.min(distance, 1)) * 100);
-      } catch {
-        usedModel = false;
-        match = await compareWithDemoFallback(referenceImage, capturedImage);
-      }
+        const match = Math.round(Math.max(0, 1 - Math.min(distance, 1)) * 100);
+        const isVerified = distance <= FACE_DISTANCE_THRESHOLD && match >= threshold;
 
-      const isVerified = match >= threshold;
-      setMatchPercent(match);
-      setVerified(isVerified);
-      setMessage(
-        isVerified
-          ? usedModel
-            ? "Face verified using face-api.js model comparison."
-            : "Face verified in demo fallback mode. Add face-api model files in public/models for real matching."
-          : "Face match below threshold. Please capture again."
-      );
-      onVerified?.({ verified: isVerified, match, capturedImage });
+        setMatchPercent(match);
+        setVerified(isVerified);
+        setMessage(
+          isVerified
+            ? "Face verified using secure face-api.js descriptor comparison."
+            : "Face mismatch detected. Registration or voting is blocked."
+        );
+        onVerified?.({ verified: isVerified, match, capturedImage, distance });
+      } catch (error) {
+        setMatchPercent(0);
+        setVerified(false);
+        setMessage(
+          "Secure face verification failed. Add face-api model files in public/models and capture both faces clearly. No automatic demo match is allowed."
+        );
+        onVerified?.({ verified: false, match: 0, capturedImage, error: error.message });
+      }
     } finally {
       setBusy(false);
     }
