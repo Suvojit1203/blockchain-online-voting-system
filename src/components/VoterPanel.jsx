@@ -5,12 +5,23 @@ import {
   requestBlockchainVoterRegistration,
   shortenHash
 } from "../utils/contractHelpers";
+import {
+  getVoterByCard,
+  recordVerificationAudit,
+  updateVoterFaceVerification
+} from "../utils/localRegistry";
 import CandidateSymbol from "./CandidateSymbol";
+import FaceVerification from "./FaceVerification";
+import OTPVerification from "./OTPVerification";
+import VoterProfile from "./VoterProfile";
 
 export default function VoterPanel({ account, authSession, dashboard, onRefresh, onStatus }) {
   const [selectedCandidate, setSelectedCandidate] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const [voteOtpVerified, setVoteOtpVerified] = useState(false);
+  const [faceGate, setFaceGate] = useState({ verified: false, match: 0 });
+  const voterProfile = getVoterByCard(authSession?.voterCard || authSession?.id || "");
 
   async function handleVote(event) {
     event.preventDefault();
@@ -22,6 +33,16 @@ export default function VoterPanel({ account, authSession, dashboard, onRefresh,
 
     if (!selectedCandidate) {
       onStatus("Please select a candidate.", "error");
+      return;
+    }
+
+    if (!voteOtpVerified) {
+      onStatus("Complete voting-day OTP verification before casting vote.", "error");
+      return;
+    }
+
+    if (!faceGate.verified) {
+      onStatus("Complete live face verification before casting vote.", "error");
       return;
     }
 
@@ -86,9 +107,14 @@ export default function VoterPanel({ account, authSession, dashboard, onRefresh,
     dashboard.registered &&
     !dashboard.voted &&
     dashboard.active &&
-    !dashboard.paused;
+    !dashboard.paused &&
+    voteOtpVerified &&
+    faceGate.verified;
 
   return (
+    <section className="grid gap-5">
+    <VoterProfile voter={voterProfile} walletAddress={account} dashboard={dashboard} />
+
     <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -141,6 +167,57 @@ export default function VoterPanel({ account, authSession, dashboard, onRefresh,
         </div>
       ) : null}
 
+      {!voteOtpVerified ? (
+        <div className="mb-5">
+          <OTPVerification
+            mobile={voterProfile?.phone || ""}
+            verified={voteOtpVerified}
+            onVerified={(verified, mobile) => {
+              setVoteOtpVerified(verified);
+              if (verified) {
+                recordVerificationAudit("OTP Verified", {
+                  actor: voterProfile?.voterCard || mobile,
+                  detail: `Voting-day OTP verified for ${voterProfile?.name || "voter"}.`
+                });
+                onStatus("Voting-day OTP verified. Continue with face verification.", "success");
+              }
+            }}
+          />
+        </div>
+      ) : (
+        <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+          Voting-day OTP verification complete.
+        </div>
+      )}
+
+      {voteOtpVerified && !faceGate.verified ? (
+        <div className="mb-5">
+          {voterProfile?.photo ? (
+            <FaceVerification
+              referenceImage={voterProfile.photo}
+              title="Voting Day Face Verification"
+              description="Verify live face against registration photo before candidate list is unlocked."
+              onVerified={(result) => {
+                setFaceGate(result);
+                if (result.verified) {
+                  updateVoterFaceVerification(voterProfile.voterCard, result);
+                  onStatus(`Face verified with ${result.match}% match. Candidate list unlocked.`, "success");
+                }
+              }}
+            />
+          ) : (
+            <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+              Registration photograph not found. Update the voter registration profile before voting.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+          Face verification complete. Candidate list is unlocked for this voting session.
+        </div>
+      )}
+
+      {faceGate.verified ? (
       <form className="grid gap-3" onSubmit={handleVote}>
         {dashboard.candidates.map((candidate) => (
           <label
@@ -185,6 +262,8 @@ export default function VoterPanel({ account, authSession, dashboard, onRefresh,
           Cast Secure Vote
         </button>
       </form>
+      ) : null}
+    </section>
     </section>
   );
 }

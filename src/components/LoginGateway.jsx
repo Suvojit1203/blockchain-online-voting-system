@@ -13,10 +13,14 @@ import {
   getAdmins,
   normalizeAdminId,
   normalizeVoterCard,
+  recordVerificationAudit,
   registerAdminRecord,
   registerVoterRecord
 } from "../utils/localRegistry";
+import AadhaarVerification from "./AadhaarVerification";
 import EGovLogo from "./EGovLogo";
+import FaceVerification from "./FaceVerification";
+import OTPVerification from "./OTPVerification";
 
 function createCaptcha() {
   const left = Math.floor(Math.random() * 8) + 2;
@@ -95,6 +99,19 @@ export default function LoginGateway({ onLogin }) {
   const [captcha, setCaptcha] = useState(createCaptcha);
   const [notice, setNotice] = useState("");
   const [photoName, setPhotoName] = useState("");
+  const [otpVerification, setOtpVerification] = useState({
+    verified: false,
+    mobile: ""
+  });
+  const [aadhaarVerification, setAadhaarVerification] = useState({
+    verified: false,
+    hash: ""
+  });
+  const [faceRegistration, setFaceRegistration] = useState({
+    verified: false,
+    match: 0,
+    capturedImage: ""
+  });
 
   const roleMeta = useMemo(
     () => ({
@@ -122,6 +139,10 @@ export default function LoginGateway({ onLogin }) {
 
   function updateForm(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+
+    if (field === "name" || field === "dateOfBirth") {
+      setAadhaarVerification({ verified: false, hash: "" });
+    }
   }
 
   function resetForm(nextMode = "login") {
@@ -130,6 +151,9 @@ export default function LoginGateway({ onLogin }) {
     setCaptcha(createCaptcha());
     setPhotoName("");
     setForm(blankForm);
+    setOtpVerification({ verified: false, mobile: "" });
+    setAadhaarVerification({ verified: false, hash: "" });
+    setFaceRegistration({ verified: false, match: 0, capturedImage: "" });
   }
 
   function openRole(role) {
@@ -160,6 +184,7 @@ export default function LoginGateway({ onLogin }) {
       const photo = await readPhoto(file);
       updateForm("photo", photo);
       setPhotoName(file.name);
+      setFaceRegistration({ verified: false, match: 0, capturedImage: "" });
     } catch (error) {
       setNotice(error.message);
     }
@@ -196,7 +221,12 @@ export default function LoginGateway({ onLogin }) {
           dateOfBirth: form.dateOfBirth,
           phone: form.phone,
           email: form.email,
-          photo: form.photo
+          photo: form.photo,
+          otpVerified: otpVerification.verified,
+          aadhaarVerified: aadhaarVerification.verified,
+          aadhaarHash: aadhaarVerification.hash,
+          faceRegistered: faceRegistration.verified,
+          faceMatchScore: faceRegistration.match
         });
 
         setNotice(`Voter registered successfully for ${voter.name}. You can login now.`);
@@ -241,6 +271,12 @@ export default function LoginGateway({ onLogin }) {
         dateOfBirth: voter.dateOfBirth,
         phone: voter.phone,
         email: voter.email,
+        otpVerified: voter.otpVerified,
+        aadhaarVerified: voter.aadhaarVerified,
+        aadhaarHash: voter.aadhaarHash,
+        faceRegistered: voter.faceRegistered,
+        faceVerified: voter.faceVerified,
+        faceMatchScore: voter.faceMatchScore,
         displayName: voter.name,
         photo: voter.photo
       });
@@ -281,6 +317,10 @@ export default function LoginGateway({ onLogin }) {
   const isVoter = selectedRole === "user";
   const submitLabel =
     mode === "register" ? "Register" : mode === "forgot" ? "Recover Access" : "Login";
+  const voterRegistrationReady =
+    !isVoter ||
+    mode !== "register" ||
+    (otpVerification.verified && aadhaarVerification.verified && faceRegistration.verified);
 
   return (
     <main className="portal-bg min-h-screen">
@@ -469,15 +509,35 @@ export default function LoginGateway({ onLogin }) {
                         onChange={(event) => updateForm("dateOfBirth", event.target.value)}
                         required
                       />
-                      <label className="text-sm font-bold" htmlFor="phone">
-                        Phone Number
-                      </label>
-                      <input
-                        className="focus-ring rounded-md border border-line px-3 py-3"
-                        id="phone"
-                        placeholder="Mobile number"
-                        value={form.phone}
-                        onChange={(event) => updateForm("phone", event.target.value)}
+                      <AadhaarVerification
+                        dateOfBirth={form.dateOfBirth}
+                        hash={aadhaarVerification.hash}
+                        name={form.name}
+                        verified={aadhaarVerification.verified}
+                        onVerified={(result) => {
+                          setAadhaarVerification(result);
+                          if (result.verified) {
+                            recordVerificationAudit("Aadhaar Verified", {
+                              actor: form.voterCard || form.name || "Voter",
+                              detail: `${form.name || "Voter"} completed Aadhaar simulation.`
+                            });
+                          }
+                        }}
+                      />
+                      <OTPVerification
+                        mobile={form.phone}
+                        verified={otpVerification.verified}
+                        onMobileChange={(mobile) => updateForm("phone", mobile)}
+                        onVerified={(verified, mobile) => {
+                          setOtpVerification({ verified, mobile });
+                          updateForm("phone", mobile);
+                          if (verified) {
+                            recordVerificationAudit("OTP Verified", {
+                              actor: form.voterCard || mobile,
+                              detail: `Mobile ${mobile} verified with demo OTP.`
+                            });
+                          }
+                        }}
                       />
                       <label className="text-sm font-bold" htmlFor="email">
                         Email ID
@@ -502,6 +562,26 @@ export default function LoginGateway({ onLogin }) {
                         required
                       />
                       {photoName ? <p className="text-xs text-slate-500">Selected: {photoName}</p> : null}
+                      {form.photo ? (
+                        <FaceVerification
+                          referenceImage={form.photo}
+                          title="Face Registration"
+                          description="Capture live face image and match it with uploaded voter photograph."
+                          onVerified={(result) => {
+                            setFaceRegistration(result);
+                            if (result.verified) {
+                              recordVerificationAudit("Face Registered", {
+                                actor: form.voterCard || form.name || "Voter",
+                                detail: `${form.name || "Voter"} face registered with ${result.match}% match.`
+                              });
+                            }
+                          }}
+                        />
+                      ) : (
+                        <p className="rounded-md bg-slate-50 p-3 text-xs text-slate-500">
+                          Upload current photograph to unlock face registration.
+                        </p>
+                      )}
                     </>
                   ) : null}
                 </>
@@ -607,8 +687,9 @@ export default function LoginGateway({ onLogin }) {
               ) : null}
 
               <button
-                className="focus-ring mt-2 inline-flex items-center justify-center gap-2 rounded-md bg-brand px-4 py-3 font-bold text-white"
+                className="focus-ring mt-2 inline-flex items-center justify-center gap-2 rounded-md bg-brand px-4 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 type="submit"
+                disabled={!voterRegistrationReady}
               >
                 {mode === "register" ? (
                   <UserPlus size={18} />
@@ -619,6 +700,11 @@ export default function LoginGateway({ onLogin }) {
                 )}
                 {submitLabel}
               </button>
+              {!voterRegistrationReady ? (
+                <p className="text-xs font-semibold text-red-700">
+                  Complete OTP, Aadhaar simulation, and face registration to enable voter registration.
+                </p>
+              ) : null}
             </form>
 
             <div className="mt-4 flex flex-wrap gap-3 text-sm">

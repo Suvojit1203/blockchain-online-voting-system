@@ -5,6 +5,7 @@ const VOTERS_KEY = "blockvote:voters";
 const ADMINS_KEY = "blockvote:admins";
 const REQUESTS_KEY = "blockvote:voterCorrectionRequests";
 const RESULT_DECLARATION_KEY = "blockvote:resultDeclaration";
+const VERIFICATION_AUDIT_KEY = "blockvote:verificationAudit";
 
 const defaultVoters = [
   {
@@ -14,6 +15,13 @@ const defaultVoters = [
     phone: "9876543210",
     email: "ananya.roy@example.com",
     photo: "",
+    otpVerified: true,
+    aadhaarVerified: true,
+    aadhaarHash: "",
+    faceRegistered: true,
+    faceVerified: false,
+    faceMatchScore: 0,
+    lastFaceVerifiedAt: "",
     registeredAt: "2026-06-22T05:30:00.000Z",
     updatedAt: "2026-06-22T05:30:00.000Z"
   }
@@ -107,6 +115,26 @@ export function saveCorrectionRequests(requests) {
   writeJson(REQUESTS_KEY, requests);
 }
 
+export function getVerificationAuditEvents() {
+  return safeRead(VERIFICATION_AUDIT_KEY, []);
+}
+
+export function recordVerificationAudit(type, data = {}) {
+  const events = getVerificationAuditEvents();
+  const event = {
+    id: createRequestId(),
+    type,
+    actor: data.actor || data.voterCard || data.wallet || "Portal User",
+    detail: data.detail || type,
+    timestamp: new Date().toISOString(),
+    txHash: data.txHash || "",
+    blockNumber: data.blockNumber || ""
+  };
+
+  writeJson(VERIFICATION_AUDIT_KEY, [event, ...events].slice(0, 100));
+  return event;
+}
+
 export function getResultDeclaration() {
   return safeRead(RESULT_DECLARATION_KEY, {
     declared: false,
@@ -165,6 +193,11 @@ export function registerVoterRecord(data) {
   const phone = data.phone?.trim() || "";
   const email = data.email?.trim() || "";
   const photo = data.photo || "";
+  const otpVerified = Boolean(data.otpVerified);
+  const aadhaarVerified = Boolean(data.aadhaarVerified);
+  const aadhaarHash = data.aadhaarHash || "";
+  const faceRegistered = Boolean(data.faceRegistered);
+  const faceMatchScore = Number(data.faceMatchScore || 0);
   const voters = getVoters();
 
   if (!name) throw new Error("Voter name is required.");
@@ -174,7 +207,10 @@ export function registerVoterRecord(data) {
   if (getAge(dateOfBirth) < 18) {
     throw new Error("Voter must be 18 years or older at registration time.");
   }
+  if (!otpVerified) throw new Error("Mobile OTP verification is required.");
+  if (!aadhaarVerified || !aadhaarHash) throw new Error("Aadhaar simulation verification is required.");
   if (!photo) throw new Error("Current voter photo is required during registration.");
+  if (!faceRegistered) throw new Error("Face registration verification is required.");
 
   const duplicateCard = voters.some(
     (voter) => normalizeVoterCard(voter.voterCard) === voterCard
@@ -195,12 +231,49 @@ export function registerVoterRecord(data) {
     phone,
     email,
     photo,
+    otpVerified,
+    aadhaarVerified,
+    aadhaarHash,
+    faceRegistered,
+    faceVerified: false,
+    faceMatchScore,
+    lastFaceVerifiedAt: "",
     registeredAt: now,
     updatedAt: now
   };
 
   saveVoters([...voters, voter]);
+  recordVerificationAudit("Voter Registered", {
+    voterCard,
+    actor: voterCard,
+    detail: `${name} registered with OTP, Aadhaar hash, and face registration.`
+  });
   return voter;
+}
+
+export function updateVoterFaceVerification(voterCard, data = {}) {
+  const normalizedCard = normalizeVoterCard(voterCard || "");
+  const voters = getVoters();
+  const index = voters.findIndex((voter) => normalizeVoterCard(voter.voterCard) === normalizedCard);
+
+  if (index === -1) throw new Error("Voter profile not found.");
+
+  const updated = {
+    ...voters[index],
+    faceVerified: Boolean(data.verified),
+    faceMatchScore: Number(data.match || 0),
+    lastFaceVerifiedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  voters[index] = updated;
+  saveVoters(voters);
+  recordVerificationAudit("Face Verified", {
+    voterCard: updated.voterCard,
+    actor: updated.voterCard,
+    detail: `${updated.name} face verification match ${updated.faceMatchScore}%.`
+  });
+  return updated;
 }
 
 export function updateVoterProfile(voterCard, updates) {

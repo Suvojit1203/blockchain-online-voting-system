@@ -2,8 +2,6 @@ import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   Building2,
-  ClipboardList,
-  ExternalLink,
   Megaphone,
   Pause,
   Play,
@@ -20,7 +18,6 @@ import {
   configureElection,
   declareResultOnChain,
   formatTimestamp,
-  getAuditLogs,
   getVoterRegistrationRequests,
   pauseElection,
   registerVoter,
@@ -31,12 +28,12 @@ import {
   stopElection,
   unpauseElection
 } from "../utils/contractHelpers";
-import { CONTRACT_CONFIG } from "../config/contractConfig";
 import {
   declareElectionResult,
   resetElectionResultDeclaration
 } from "../utils/localRegistry";
 import AnalyticsCharts from "./AnalyticsCharts";
+import AuditLog from "./AuditLog";
 import StatCard from "./StatCard";
 
 export default function AdminPanel({
@@ -62,7 +59,6 @@ export default function AdminPanel({
   });
   const [voterAddress, setVoterAddress] = useState("");
   const [voterIdentityHash, setVoterIdentityHash] = useState("");
-  const [auditLogs, setAuditLogs] = useState([]);
   const [registrationRequests, setRegistrationRequests] = useState([]);
   const [extrasLoading, setExtrasLoading] = useState(false);
   const [busyAction, setBusyAction] = useState("");
@@ -90,14 +86,9 @@ export default function AdminPanel({
     setExtrasLoading(true);
 
     try {
-      const [logs, requests] = await Promise.all([
-        getAuditLogs(30),
-        getVoterRegistrationRequests()
-      ]);
-      setAuditLogs(logs);
+      const requests = await getVoterRegistrationRequests();
       setRegistrationRequests(requests);
     } catch {
-      setAuditLogs([]);
       setRegistrationRequests([]);
     } finally {
       setExtrasLoading(false);
@@ -599,70 +590,7 @@ export default function AdminPanel({
         )}
       </section>
 
-      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase text-brand">Blockchain Audit Trail</p>
-            <h2 className="text-xl font-bold">Transaction History</h2>
-            <p className="text-sm text-slate-500">
-              Event log for election setup, voter registration, vote casting, pause actions, and result declaration.
-            </p>
-          </div>
-          <a
-            className="focus-ring inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            href={`${CONTRACT_CONFIG.blockExplorer}/address/${CONTRACT_CONFIG.address}`}
-            rel="noreferrer"
-            target="_blank"
-          >
-            <ExternalLink size={15} />
-            Explorer
-          </a>
-        </div>
-
-        {auditLogs.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[780px] border-collapse text-left text-sm">
-              <thead>
-                <tr className="border-b border-line bg-slate-50 text-slate-600">
-                  <th className="px-3 py-2">Event</th>
-                  <th className="px-3 py-2">Details</th>
-                  <th className="px-3 py-2">Block</th>
-                  <th className="px-3 py-2">Tx Hash</th>
-                  <th className="px-3 py-2">Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {auditLogs.map((log) => (
-                  <tr className="border-b border-line last:border-0" key={`${log.txHash}-${log.eventName}`}>
-                    <td className="px-3 py-2 font-semibold">{log.eventName}</td>
-                    <td className="px-3 py-2 text-slate-600">{log.detail}</td>
-                    <td className="px-3 py-2">{log.blockNumber}</td>
-                    <td className="px-3 py-2">
-                      <a
-                        className="font-semibold text-sky-800 underline"
-                        href={`${CONTRACT_CONFIG.blockExplorer}/tx/${log.txHash}`}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        {shortenHash(log.txHash)}
-                      </a>
-                    </td>
-                    <td className="px-3 py-2 text-slate-500">{formatTimestamp(log.timestamp)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="rounded-md border border-dashed border-line bg-slate-50 p-5 text-sm text-slate-500">
-            <div className="mb-2 flex items-center gap-2 font-semibold text-slate-700">
-              <ClipboardList size={16} />
-              {extrasLoading ? "Loading audit log..." : "No audit events found yet."}
-            </div>
-            Deploy the upgraded contract and perform transactions to populate this blockchain audit table.
-          </div>
-        )}
-      </section>
+      <AuditLog />
     </div>
   );
 }
