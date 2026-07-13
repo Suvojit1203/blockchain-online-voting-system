@@ -1,0 +1,11 @@
+* text=auto
+
+# Keep common source and config files normalized as text
+*.js text
+*.jsx text
+*.json text
+*.css text
+*.cjs text
+*.sol text
+*.md text
+*.html text
