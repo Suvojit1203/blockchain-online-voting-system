@@ -1,5 +1,5 @@
 export const CONTRACT_CONFIG = {
-  address: "0xf4e0C313D20d7E194d5bb564FFDBBF9335255972",
+  address: "0x87c6aa029cC5Ce2cf60cd49a315F57A9B766C3C1",
   networkName: "Sepolia Test Network",
   chainId: "0xaa36a7",
   chainIdDecimal: 11155111,
