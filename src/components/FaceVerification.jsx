@@ -3,7 +3,7 @@ import { Camera, CheckCircle2, ScanFace, ShieldAlert } from "lucide-react";
 import * as faceapi from "face-api.js";
 
 const MODEL_URL = "/models";
-const FACE_DISTANCE_THRESHOLD = 0.55;
+const FACE_DISTANCE_THRESHOLD = 0.5;
 
 async function loadFaceModels() {
   await Promise.all([
@@ -15,7 +15,7 @@ async function loadFaceModels() {
 
 export default function FaceVerification({
   referenceImage,
-  threshold = 60,
+  threshold = 50,
   onVerified,
   title = "Face Verification",
   description = "Capture live face image and compare with registration photograph."
@@ -119,7 +119,7 @@ export default function FaceVerification({
         setMessage(
           isVerified
             ? "Face verified using secure face-api.js descriptor comparison."
-            : "Face mismatch detected. Registration or voting is blocked."
+            : `Face mismatch or weak confidence detected. Registration or voting is blocked. Required: ${threshold}%+ match and low descriptor distance.`
         );
         onVerified?.({ verified: isVerified, match, capturedImage, distance });
       } catch (error) {
